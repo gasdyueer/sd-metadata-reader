@@ -1,13 +1,13 @@
 # ui/main_window.py
 import os
-import pprint # For pretty printing dicts
+import pprint # 用于美化打印字典
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QListWidget, QTextEdit, QLineEdit, QLabel,
     QSplitter, QFileDialog, QCheckBox, QListWidgetItem, QScrollArea,
     QMessageBox
 )
-from PySide6.QtCore import Qt, Slot, QSize
+from PySide6.QtCore import Qt, Slot, QSize, QTimer
 from PySide6.QtGui import QPixmap, QImage
 
 
@@ -22,15 +22,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("SD图像元数据阅读器")
         # self.setWindowIcon(QIcon("assets/icon.png")) # Optional icon
-        self.setGeometry(100, 100, 1200, 700) # Set initial size
+        self.setGeometry(100, 100, 1200, 700) # 设置初始窗口大小
         self.current_search_pattern = None
 
         self.current_folder_path = None
-        self.current_file_list = [] # List of files in the loaded folder
+        self.current_file_list = [] # 已加载文件夹中的文件列表
         self.current_single_file = None
-        self.current_metadata_cache = {} # Cache metadata for folder view {filepath: metadata}
-        self.last_selected_folder = "" # Remember last folder for dialog
-        self.previous_state = None # Track previous state for back button
+        self.current_metadata_cache = {} # 缓存文件夹视图的元数据{文件路径:元数据}
+        self.last_selected_folder = "" # 记住对话框最后选择的文件夹
+        self.previous_state = None # 记录返回按钮的先前状态
         self.original_file_list = []  # 保存原始文件列表
         self.current_search_pattern = None
 
@@ -81,7 +81,7 @@ class MainWindow(QMainWindow):
         self.image_preview_label = QLabel("未选择图片")
         self.image_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_preview_label.setMinimumSize(200, 200) # Min preview size
-        self.image_preview_scroll = QScrollArea() # Make preview scrollable if image is large
+        self.image_preview_scroll = QScrollArea() # 如果图片过大则使预览可滚动
         self.image_preview_scroll.setWidgetResizable(True)
         self.image_preview_scroll.setWidget(self.image_preview_label)
         self.image_preview_scroll.setVisible(False) # Initially hidden
@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
         self.metadata_label = QLabel("元数据:")
         self.metadata_text = QTextEdit()
         self.metadata_text.setReadOnly(True)
-        self.metadata_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap) # Allow horizontal scroll
+        self.metadata_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap) # 允许水平滚动
         metadata_layout.addWidget(self.metadata_label)
         metadata_layout.addWidget(self.metadata_text)
         middle_splitter.addWidget(metadata_widget)
@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         node_list_layout.setContentsMargins(0,0,0,0)
         self.node_list_label = QLabel("ComfyUI 节点:")
         self.node_list = QListWidget()
-        self.node_list.setVisible(False) # Hide initially, show only for ComfyUI
+        self.node_list.setVisible(False) # 初始隐藏，仅对ComfyUI显示
         self.node_list_label.setVisible(False)
         node_list_layout.addWidget(self.node_list_label)
         node_list_layout.addWidget(self.node_list)
@@ -180,6 +180,7 @@ class MainWindow(QMainWindow):
                 else:
                     self.update_file_list_widget(self.current_file_list)
                 self.show_file_list()
+                self.clear_displays()  # 返回操作后清除元数据
             elif self.previous_state == "single_file_view":
                 # Restore single file view
                 if self.current_single_file and self.current_metadata_cache.get(self.current_single_file):
@@ -189,6 +190,7 @@ class MainWindow(QMainWindow):
         elif self.current_folder_path:
             self.update_file_list_widget(self.current_file_list)
             self.show_file_list()
+            self.clear_displays()  # 返回操作后清除元数据
         else:
             self.show_drag_drop_prompt()
 
@@ -271,7 +273,7 @@ class MainWindow(QMainWindow):
 
 
         self.metadata_text.setText(basic_info_str + source_str + parsed_str)
-        self.log_message(f"Displayed metadata for: {metadata.get('file_path')}")
+        self.log_message(f"已显示元数据: {metadata.get('file_path')}")
 
         # Populate ComfyUI Node List if available (FR-14)
         # nodes = metadata.get('comfy_nodes', {})
@@ -284,7 +286,7 @@ class MainWindow(QMainWindow):
                  # Store the full node data with the item for later retrieval
                  item.setData(Qt.ItemDataRole.UserRole, node_data)
                  self.node_list.addItem(item)
-            self.log_message(f"Populated ComfyUI node list ({len(comfy_nodes_extracted)} nodes).")
+            self.log_message(f"已填充ComfyUI节点列表(共{len(comfy_nodes_extracted)}个节点).")
 
 
     def display_image_preview(self, file_path: str):
@@ -305,6 +307,9 @@ class MainWindow(QMainWindow):
             )
             self.image_preview_label.setPixmap(scaled_pixmap)
             self.show_image_preview()
+            self.log_message(f"成功选择并显示图片: {os.path.basename(file_path)}")
+            return True
+
         except Exception as e:
             self.image_preview_label.setText(f"Preview Error:\n{e}")
             self.log_message(f"Error creating preview for {file_path}: {e}")
@@ -328,17 +333,14 @@ class MainWindow(QMainWindow):
              self.file_list_widget.addItem(item)
 
         self.show_file_list()
-        # Select the first item automatically?
-        if self.file_list_widget.count() > 0:
-             self.file_list_widget.setCurrentRow(0)
-             self.handle_list_selection_changed(self.file_list_widget.currentItem())
+        # 不再自动选择第一项，让用户自行选择
 
 
     # --- Event Handlers / Slots ---
 
     @Slot()
     def handle_open(self):
-        """Handles the 'Open File/Folder' button click (FR-02)."""
+        """处理'打开文件/文件夹'按钮点击事件 (FR-02)."""
         dialog = QFileDialog(self)
         dialog.setFileMode(QFileDialog.FileMode.ExistingFiles) # Allow selecting files or a dir
         # Start in the last selected directory or home
@@ -353,27 +355,45 @@ class MainWindow(QMainWindow):
         # PySide doesn't directly support FileDialog.DirectoryOnly *and* FileDialog.ExistingFiles
         # So we allow ExistingFiles and check the result. A simpler alternative is two buttons.
         # Let's try asking the user first.
-        choice = QMessageBox.question(self, "打开类型", "打开单个/多个文件或文件夹?",
-                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
-                                      QMessageBox.StandardButton.Yes) # Default to File
+        
+        # 弹出对话框询问用户打开类型
+        choice = QMessageBox.question(
+            self, 
+            "选择打开方式", 
+            "请选择打开方式:\n\n是 - 打开单个或多个文件\n否 - 打开文件夹",
+            QMessageBox.StandardButton.Yes | 
+            QMessageBox.StandardButton.No | 
+            QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes
+        )
 
-        if choice == QMessageBox.StandardButton.Yes: # Open File(s)
-             dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
-             if dialog.exec():
-                 paths = dialog.selectedFiles()
-                 if paths:
-                     if len(paths) == 1:
-                         self.process_single_file(paths[0])
-                     else:
-                         # If multiple files selected, treat as a "folder" list view
-                         self.process_folder(paths, is_explicit_list=True) # Flag that it's not a real folder scan
+        # 用户选择打开文件
+        if choice == QMessageBox.StandardButton.Yes:
+            dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+            if dialog.exec():
+                paths = dialog.selectedFiles()
+                if paths:
+                    # 单文件处理
+                    if len(paths) == 1:
+                        self.process_single_file(paths[0])
+                    # 多文件处理
+                    else:
+                        self.process_folder(paths, is_explicit_list=True)
 
-        elif choice == QMessageBox.StandardButton.No: # Open Folder
-             folder_path = QFileDialog.getExistingDirectory(self, "Select Folder", start_dir)
-             if folder_path:
-                  self.last_selected_folder = folder_path # Remember for next time
-                  self.process_folder(folder_path)
-        else: # Cancelled
+        # 用户选择打开文件夹
+        elif choice == QMessageBox.StandardButton.No:
+            folder_path = QFileDialog.getExistingDirectory(
+                self,
+                "选择文件夹",
+                start_dir
+            )
+            if folder_path:
+                # 记住最后选择的文件夹路径
+                self.last_selected_folder = folder_path
+                self.process_folder(folder_path)
+                
+        # 用户取消操作
+        else:
             return
 
     @Slot(list)
@@ -434,8 +454,9 @@ class MainWindow(QMainWindow):
             self.log_message(f"Invalid item selected or file not found: {file_path}")
             return
 
+        # 设置状态
         if self.file_list_widget.isVisible():
-            self.previous_state = "folder_view"
+            self.previous_state = "folder_view" if not self.current_search_pattern else "search_view"
 
         # Check cache first
         if file_path in self.current_metadata_cache:
@@ -447,12 +468,15 @@ class MainWindow(QMainWindow):
             self.current_metadata_cache[file_path] = metadata # Cache the result
 
         if metadata:
+            # 先显示元数据，再显示预览
             self.display_metadata(metadata)
-            # Display preview as well (FR-03)
+            # 确保预览显示
             self.display_image_preview(file_path)
         else:
              self.clear_displays()
              self.log_message(f"Failed to get metadata for {file_path}")
+             # 即使没有元数据，也尝试显示图片预览
+             self.display_image_preview(file_path)
 
 
     @Slot(QListWidgetItem, QListWidgetItem)
