@@ -269,7 +269,15 @@ class MainWindow(QMainWindow):
              if key == '_Parsing_Errors' and not value: continue # Hide empty error list
              display_dict[key] = value
 
-        parsed_str += pprint.pformat(display_dict, indent=2, width=120)
+        parsed_str += pprint.pformat(display_dict, width=1145)
+        # 替换部分字符以符合所需格式
+        parsed_str = parsed_str.replace("'", "").replace(":", ": ").replace(", ", ",")
+        parsed_str1 = parsed_str.split("Prompt (raw JSON):")[0]
+        parsed_str2 = parsed_str.split("Prompt (raw JSON):")[1]
+        parsed_str1 = '{\n' + '\n'.join([line.strip() for line in parsed_str1.split('\n')[1:-1]]) + '\n}'
+        parsed_str1 = parsed_str1.replace("{", "{\n").replace("}", "\n}").replace("\\\\n", "\n")
+        parsed_str1 = parsed_str1.replace("\n\n", "\n")
+        parsed_str = parsed_str1 + parsed_str2
 
 
         self.metadata_text.setText(basic_info_str + source_str + parsed_str)
