@@ -66,4 +66,4 @@
 
 ## 许可证
 
-[在此处添加项目许可证信息，例如 MIT License]
+[MIT License]
