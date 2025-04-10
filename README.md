@@ -60,6 +60,7 @@ python main.py
 使用 PyInstaller 构建可执行文件:
 ```bash
 pyinstaller --onefile --windowed main.py
+# 其实是用pyinstaller main.spec打包的
 ```
 
 ## 许可证
