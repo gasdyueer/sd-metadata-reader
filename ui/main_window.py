@@ -271,13 +271,45 @@ class MainWindow(QMainWindow):
 
         parsed_str += pprint.pformat(display_dict, width=1145)
         # 替换部分字符以符合所需格式
-        parsed_str = parsed_str.replace("'", "").replace(":", ": ").replace(", ", ",")
-        parsed_str1 = parsed_str.split("Prompt (raw JSON):")[0]
-        parsed_str2 = parsed_str.split("Prompt (raw JSON):")[1]
-        parsed_str1 = '{\n' + '\n'.join([line.strip() for line in parsed_str1.split('\n')[1:-1]]) + '\n}'
-        parsed_str1 = parsed_str1.replace("{", "{\n").replace("}", "\n}").replace("\\\\n", "\n")
-        parsed_str1 = parsed_str1.replace("\n\n", "\n")
-        parsed_str = parsed_str1 + parsed_str2
+        parsed_str = parsed_str.replace("'", "").replace(":", ": ").replace(", ", ",").replace("\\\\", "\\")
+        
+        # 这段代码用于格式化元数据字符串的显示格式
+        # 主要处理两种情况:
+        # 1. 包含"Prompt (raw JSON):"的字符串需要特殊处理,保留JSON部分的格式
+        # 2. 普通元数据字符串的格式化
+        try:
+            if "Prompt (raw JSON):" in parsed_str:
+                # 按"Prompt (raw JSON):"分割字符串
+                parts = parsed_str.split("Prompt (raw JSON):")
+                if len(parts) >= 2:
+                    # 日志记录
+                    # self.log_message(f"Found 'Prompt (raw JSON):' in metadata for {metadata.get('file_path')}")
+                    # 处理第一部分(非JSON部分)
+                    # 去除首尾行,每行去除空格,用换行符连接
+                    parsed_str1 = '{\n' + '\n'.join([line.strip() for line in parts[0].split('\n')[1:-1]]) + '\n}'
+                    # 格式化处理:添加换行,替换转义字符
+                    parsed_str1 = parsed_str1.replace("{", "{\n").replace("}", "\n}").replace("\\\\n", "\n")
+                    # 移除多余的空行
+                    parsed_str1 = parsed_str1.replace("\n\n", "\n")
+                    
+                    # 重新组合两部分
+                    parsed_str = parsed_str1 + "Prompt (raw JSON):" + parts[1]
+                else:
+                    # 处理格式异常的情况,使用通用格式化
+                    pass
+            else:
+                # 处理不包含JSON的普通元数据字符串
+                parsed_str = '{\n' + '\n'.join([line.strip() for line in parsed_str.split('\n')[1:-1]]) + '\n}'
+                parsed_str = parsed_str.replace("{", "{\n").replace("}", "\n}").replace("\\\\n", "\n")
+                parsed_str = parsed_str.replace("\n\n", "\n")
+            # 检查字符串中的连续大括号并修复格式
+            while "{\n{" in parsed_str1 and "}\n}" in parsed_str1:
+                parsed_str1 = parsed_str1.replace("{\n{", "{\n").replace("}\n}", "}\n")
+            # positive-prompt的换行处理
+            parsed_str = parsed_str.replace("\\n", "\n")
+        except Exception as e:
+            self.log_message(f"格式化元数据时出错: {e}")
+            parsed_str = pprint.pformat(display_dict, width=1145)
 
 
         self.metadata_text.setText(basic_info_str + source_str + parsed_str)

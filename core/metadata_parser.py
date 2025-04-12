@@ -6,11 +6,11 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo # 用于潜在的 PNG 元数据访问
 
 # WebUI 详细解析的占位符（实现第 4.3 节中的逻辑）
-def parse_prompt1(text: str) -> dict:
+def parse_prompt1(text: str or dict) -> dict:
     """
     解析通常在 WebUI 生成的图像中找到的“parameters”字符串。
     提取正面提示、负面提示和键值参数。
-    （基于提供的示例的简化实现）
+    现在可以接受字符串或字典作为输入。
     """
     output = {
         'Positive Prompt': 'Not found',
@@ -26,21 +26,26 @@ def parse_prompt1(text: str) -> dict:
         'Model': 'Not found',
         'Version': 'Not found',
         'Module': 'Not found',
-        # 根据需要添加其他常见参数
         '_Parsing_Errors': []
     }
+
     try:
+        # Handle dictionary input (from get_image_info)
+        if isinstance(text, dict):
+            if 'Info' in text and 'parameters' in text['Info']:
+                text = text['Info']['parameters']
+            else:
+                output['_Parsing_Errors'].append(
+                    "Input dictionary doesn't contain parameters")
+                return output
+
+        # Ensure we have a string to work with
+        if not isinstance(text, str):
+            output['_Parsing_Errors'].append(
+                f"Expected string or dict with parameters, got {type(text)}")
+            return output
+
         lines = text.strip().split('\n')
-        positive_prompt_lines = []
-        negative_prompt_lines = []
-        params_lines = []
-        current_section = 'positive' # 默认假设
-
-        # 基本部分拆分
-        neg_prompt_marker = 'Negative prompt:'
-        # 更可靠的参数开始标记：查找包含 "Steps:" 的行
-        param_start_marker = 'Steps:'
-
         positive_prompt_lines = []
         negative_prompt_lines = []
         params_lines = []
@@ -48,10 +53,13 @@ def parse_prompt1(text: str) -> dict:
         # 查找 Negative prompt 和 Steps 的位置
         neg_line_index = -1
         param_line_index = -1
-        param_char_index = -1 # 参数在行内的起始字符位置
+        param_char_index = -1  # 参数在行内的起始字符位置
+
+        neg_prompt_marker = 'Negative prompt:'
+        param_start_marker = 'Steps:'
 
         for i, line in enumerate(lines):
-            if neg_line_index == -1: # 仅查找第一个 Negative prompt
+            if neg_line_index == -1:  # 仅查找第一个 Negative prompt
                 neg_marker_pos = line.find(neg_prompt_marker)
                 if neg_marker_pos != -1:
                     neg_line_index = i
@@ -60,112 +68,97 @@ def parse_prompt1(text: str) -> dict:
                     # 将 Negative prompt 所在行的前半部分加入 positive
                     positive_prompt_lines.append(line[:neg_marker_pos].strip())
                     # 将 Negative prompt 所在行的后半部分作为 negative 的开始
-                    potential_neg_start = line[neg_marker_pos + len(neg_prompt_marker):].strip()
+                    potential_neg_start = line[neg_marker_pos + len(
+                        neg_prompt_marker):].strip()
                     if potential_neg_start:
                         negative_prompt_lines.append(potential_neg_start)
 
             # 查找第一个 Steps: (通常标志着参数部分的开始)
-            # 即使在 Negative prompt 行之后也要继续查找
             if param_line_index == -1:
                 param_marker_pos = line.find(param_start_marker)
                 if param_marker_pos != -1:
                     param_line_index = i
-                    param_char_index = param_marker_pos # 记录 Steps: 在行内的位置
+                    param_char_index = param_marker_pos  # 记录 Steps: 在行内的位置
 
         # --- 分割逻辑 ---
-        if neg_line_index != -1: # 找到了 Negative prompt
-            if param_line_index != -1: # 同时找到了 Steps:
-                if param_line_index == neg_line_index: # Steps: 和 Negative prompt 在同一行
+        if neg_line_index != -1:  # 找到了 Negative prompt
+            if param_line_index != -1:  # 同时找到了 Steps:
+                if param_line_index == neg_line_index:  # Steps: 和 Negative prompt 在同一行
                     # Negative prompt 内容是 Steps: 之前的部分
-                    neg_text_on_line = lines[neg_line_index][neg_line_index + len(neg_prompt_marker):param_char_index].strip()
-                    if neg_text_on_line: # 确保不添加空行
-                         # 替换之前可能添加的整行后半部分
-                         if negative_prompt_lines: negative_prompt_lines[-1] = neg_text_on_line
-                         else: negative_prompt_lines.append(neg_text_on_line)
+                    neg_text_on_line = lines[neg_line_index][
+                                       neg_line_index + len(
+                                           neg_prompt_marker):param_char_index].strip()
+                    if neg_text_on_line:  # 确保不添加空行
+                        # 替换之前可能添加的整行后半部分
+                        if negative_prompt_lines:
+                            negative_prompt_lines[-1] = neg_text_on_line
+                        else:
+                            negative_prompt_lines.append(neg_text_on_line)
 
                     # 参数从 Steps: 开始
-                    params_lines.append(lines[param_line_index][param_char_index:])
+                    params_lines.append(
+                        lines[param_line_index][param_char_index:])
                     params_lines.extend(lines[param_line_index + 1:])
-                elif param_line_index > neg_line_index: # Steps: 在 Negative prompt 之后的行
+                elif param_line_index > neg_line_index:  # Steps: 在 Negative prompt 之后的行
                     # Negative prompt 内容包括 neg_line_index 的后半部分，以及直到 param_line_index 之前的所有行
-                    negative_prompt_lines.extend(lines[neg_line_index + 1 : param_line_index])
+                    negative_prompt_lines.extend(
+                        lines[neg_line_index + 1: param_line_index])
                     # 参数从 param_line_index 开始
                     params_lines.extend(lines[param_line_index:])
-                else: # Steps: 在 Negative prompt 之前（理论上不太可能，按原样处理）
-                    # 这种情况意味着参数部分在 Negative prompt 之前，逻辑上不符合常见格式
-                    # 保持之前的逻辑：positive 到 neg_line_index, negative 从 neg_line_index 后半部分开始
-                    # 参数行可能被错误地包含在 positive 或 negative 中，后续解析会尝试提取
-                    negative_prompt_lines.extend(lines[neg_line_index + 1:]) # 将 neg 行之后所有行暂归为 negative
-                    output['_Parsing_Errors'].append("Warning: 'Steps:' found before 'Negative prompt:'. Parsing might be inaccurate.")
-            else: # 只找到了 Negative prompt，没找到 Steps:
-                # 将 Negative prompt 之后的所有行都视为 Negative prompt 的一部分
+                else:  # Steps: 在 Negative prompt 之前（理论上不太可能，按原样处理）
+                    negative_prompt_lines.extend(lines[neg_line_index + 1:])
+                    output['_Parsing_Errors'].append(
+                        "Warning: 'Steps:' found before 'Negative prompt:'. Parsing might be inaccurate.")
+            else:  # 只找到了 Negative prompt，没找到 Steps:
                 negative_prompt_lines.extend(lines[neg_line_index + 1:])
-        else: # 没有找到 Negative prompt
-            if param_line_index != -1: # 找到了 Steps:
-                # Steps: 之前的所有行都是 Positive prompt
+        else:  # 没有找到 Negative prompt
+            if param_line_index != -1:  # 找到了 Steps:
                 positive_prompt_lines.extend(lines[:param_line_index])
-                # Steps: 所在行的前半部分也是 Positive prompt
-                positive_prompt_lines.append(lines[param_line_index][:param_char_index].strip())
-                # 参数从 Steps: 开始
+                positive_prompt_lines.append(
+                    lines[param_line_index][:param_char_index].strip())
                 params_lines.append(lines[param_line_index][param_char_index:])
                 params_lines.extend(lines[param_line_index + 1:])
-            else: # 既没有 Negative prompt 也没有 Steps:
-                # 所有行都是 Positive prompt
+            else:  # 既没有 Negative prompt 也没有 Steps:
                 positive_prompt_lines = lines
 
         # 清理和赋值 Prompt
-        output['Positive Prompt'] = "\\n".join(filter(None, positive_prompt_lines)).strip() # filter(None, ...) 移除空字符串
-        output['Negative Prompt'] = "\\n".join(filter(None, negative_prompt_lines)).strip()
+        output['Positive Prompt'] = "\n".join(
+            filter(None, positive_prompt_lines)).strip()
+        output['Negative Prompt'] = "\n".join(
+            filter(None, negative_prompt_lines)).strip()
         if not output['Negative Prompt']:
-            output['Negative Prompt'] = 'Not found' # 明确说明
+            output['Negative Prompt'] = 'Not found'
 
         # --- 解析参数 ---
         if params_lines:
-            param_str = "\\n".join(params_lines).strip()
-            # 改进的正则表达式，尝试处理更复杂的值（例如带逗号的 Model 名）
-            # (\w+(?:\s\w+)*):   # Key (e.g., "CFG scale")
-            # \s*                # Optional whitespace
-            # (                  # Start capturing value
-            #   "(?:\\.|[^\\"])*" # Quoted string (handles escaped quotes)
-            #   |                # OR
-            #   (?:(?!\w+(?:\s\w+)*:).)+ # Anything not starting a new key:value pair (non-greedy)
-            # )                  # End capturing value
-            # (?:\s*,\s*|\s*$)    # Separator (comma or end of string)
-            # 更简单的正则，优先匹配常见格式，可能对复杂值有局限
-            param_regex = r'([\w\s]+):\s*(".*?"|[^,]+)(?:,\s*|$)'
-            # 再次尝试更健壮的正则，处理逗号和引号
-            # Key: (\w+(?:\s+\w+)*)
-            # Value: \s*("([^"]*)"|([^,]*))
-            # Separator: \s*(?:,|$)\s*
+            param_str = "\n".join(params_lines).strip()
             param_regex = r'(\w+(?:\s+\w+)*):\s*("([^"]*)"|([^,]*))\s*(?:,|$)\s*'
 
             params = re.findall(param_regex, param_str)
 
             param_dict = {}
             last_pos = 0
-            # 使用 finditer 获取匹配位置，帮助处理未匹配的部分（如果需要）
             for match in re.finditer(param_regex, param_str):
                 key = match.group(1).strip()
-                # 优先取非引号组 (group 4)，如果为空则取引号组 (group 3)
-                value = match.group(4) if match.group(4) is not None else match.group(3)
-                if value is None: value = "" # 处理完全没有值的情况
-                cleaned_value = value.strip().strip('"').strip() # 清理值
-
-                # 处理键名大小写不敏感问题
+                value = match.group(4) if match.group(
+                    4) is not None else match.group(3)
+                if value is None:
+                    value = ""
+                cleaned_value = value.strip().strip('"').strip()
                 normalized_key = key.lower()
                 param_dict[normalized_key] = cleaned_value
-                last_pos = match.end() # 记录最后匹配的位置
+                last_pos = match.end()
 
-            # 检查是否有剩余未解析的字符串（可能格式不符）
             remaining_str = param_str[last_pos:].strip()
             if remaining_str:
-                 output['_Parsing_Errors'].append(f"Warning: Could not parse trailing parameter text: '{remaining_str[:100]}...'")
-
+                output['_Parsing_Errors'].append(
+                    f"Warning: Could not parse trailing parameter text: '{remaining_str[:100]}...'")
 
             # 将解析的参数分配给输出字典
             processed_keys_lower = set()
-            for key_out in list(output.keys()): # 使用 list 复制 key，允许在循环中修改 output
-                if key_out in ['Positive Prompt', 'Negative Prompt', '_Parsing_Errors']:
+            for key_out in list(output.keys()):
+                if key_out in ['Positive Prompt', 'Negative Prompt',
+                               '_Parsing_Errors']:
                     continue
                 key_out_lower = key_out.lower()
                 if key_out_lower in param_dict:
@@ -175,16 +168,11 @@ def parse_prompt1(text: str) -> dict:
             # 存储未在预定义字段中匹配到的参数
             for key_in_lower, val_in in param_dict.items():
                 if key_in_lower not in processed_keys_lower:
-                    # 尝试查找原始大小写键名（如果正则能捕获）或使用小写
-                    original_case_key = key_in_lower # 默认用小写
-                    # (需要修改正则以捕获原始键名才能实现精确还原)
-                    # 暂时用小写键名加前缀
-                    output[f"Other: {key_in_lower}"] = val_in
-
+                    output[f"其他数据: {key_in_lower}"] = val_in
 
     except Exception as e:
         output['_Parsing_Errors'].append(f"Error parsing WebUI parameters: {e}")
-        output['Raw Parameters'] = text # 错误时存储原始文本
+        output['Raw Parameters'] = text
 
     return output
 
