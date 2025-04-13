@@ -3,7 +3,7 @@
 ## 效果展示
 
 
-![效果展示](docx/sdmetadatareader2.png)
+![效果展示](docx/sdmetadatareader3.png)
 
 
 ## 项目简介
