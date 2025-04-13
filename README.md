@@ -10,7 +10,7 @@
 
   
 
-这是一个用于读取和解析 Stable Diffusion (WebUI/ComfyUI) 生成图像的元数据的工具。它可以提取生成参数、提示词、ComfyUI节点信息等关键数据，并以结构化的方式展示。
+这是一个用于读取和解析 Stable Diffusion (WebUI/ComfyUI) 和 NovalAI 生成图像的元数据的工具。它可以提取生成参数、提示词、ComfyUI节点信息等关键数据，并以结构化的方式展示。
 
   
 

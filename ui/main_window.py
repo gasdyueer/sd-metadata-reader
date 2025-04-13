@@ -123,6 +123,12 @@ class MainWindow(QMainWindow):
         self.metadata_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap) # 允许水平滚动
         metadata_layout.addWidget(self.metadata_label)
         metadata_layout.addWidget(self.metadata_text)
+        
+        # Add Basic Info toggle button
+        self.basic_info_button = QPushButton("显示Basic Info")
+        self.basic_info_button.setVisible(False)
+        metadata_layout.addWidget(self.basic_info_button)
+        
         middle_splitter.addWidget(metadata_widget)
 
 
@@ -167,6 +173,7 @@ class MainWindow(QMainWindow):
         self.search_input.returnPressed.connect(self.handle_search) # Allow Enter key for search
         self.clear_button.clicked.connect(self.handle_clear)
         self.back_button.clicked.connect(self.handle_back)
+        self.basic_info_button.clicked.connect(self.handle_basic_info_toggle)
 
 
     @Slot()
@@ -193,6 +200,21 @@ class MainWindow(QMainWindow):
             self.clear_displays()  # 返回操作后清除元数据
         else:
             self.show_drag_drop_prompt()
+            
+    @Slot()
+    def handle_basic_info_toggle(self):
+        """Handles the Basic Info toggle button click."""
+        print(f"[DEBUG] 处理Basic Info切换按钮点击，当前文本状态: {self.metadata_text.toPlainText()[:50]}...")
+        if hasattr(self, 'basic_info'):
+            if self.metadata_text.toPlainText() == self.basic_info:
+                print(f"[DEBUG] 切换回完整元数据，文本长度: {len(self.current_metadata_text)}")
+                self.metadata_text.setText(self.current_metadata_text)
+                self.basic_info_button.setText("显示Basic Info")
+            else:
+                self.current_metadata_text = self.metadata_text.toPlainText()
+                print(f"[DEBUG] 切换到Basic Info，原始文本长度: {len(self.current_metadata_text)}")
+                self.metadata_text.setText(self.basic_info)
+                self.basic_info_button.setText("显示节点详情")
 
 
     @Slot()
@@ -220,6 +242,7 @@ class MainWindow(QMainWindow):
         self.node_list_label.setVisible(False)
         self.image_preview_label.clear()
         self.image_preview_label.setText("未选择图片") # Changed
+        self.basic_info_button.setVisible(False)
         # Don't clear file list here, handled separately
 
     def show_drag_drop_prompt(self):
@@ -241,6 +264,7 @@ class MainWindow(QMainWindow):
     def display_metadata(self, metadata: dict):
         """Displays the processed metadata in the UI."""
         self.clear_displays() # Clear previous data first
+        self.basic_info_button.setVisible(False)
 
         if not metadata or metadata.get('error'):
             error_msg = metadata.get('error', 'Unknown error loading metadata.')
@@ -248,85 +272,103 @@ class MainWindow(QMainWindow):
             self.log_message(f"Error loading {metadata.get('file_path', 'file')}: {error_msg}")
             return
 
-        # Display Basic Info
-        basic_info_str = "Basic Info:\n" + pprint.pformat(metadata.get('basic_info', {}), indent=2)
-        # Display Source Type
+        # 提取各部分数据
+        basic_info = metadata.get('basic_info', {})
         source_type = metadata.get('source_type', 'Unknown')
-        source_str = f"\n\nSource Type: {source_type}"
-
-        # Display Parsed Data (main content)
         parsed_data = metadata.get('parsed_data', {})
-        parsed_str = "\n\nParsed Data:\n"
+        comfy_nodes_extracted = parsed_data.get('_comfy_nodes_extracted', {})
 
-        # Pretty print parsed data, excluding internal/raw fields for main view
-        display_dict = {}
-        comfy_nodes_extracted = {}
-        for key, value in parsed_data.items():
-             if key == '_raw_info_dict': continue
-             if key == '_comfy_nodes_extracted':
-                 comfy_nodes_extracted = value # Keep nodes for list view
-                 continue # Don't print the whole node structure here
-             if key == '_Parsing_Errors' and not value: continue # Hide empty error list
-             display_dict[key] = value
-
-        parsed_str += pprint.pformat(display_dict, width=1145)
-        # 替换部分字符以符合所需格式
-        parsed_str = parsed_str.replace("'", "").replace(":", ": ").replace(", ", ",").replace("\\\\", "\\")
+        # 构建基础信息部分
+        basic_info_str = "Basic Info:\n" + pprint.pformat(basic_info, indent=2)
+        source_str = f"\n\nSource Type: {source_type}"
         
-        # 这段代码用于格式化元数据字符串的显示格式
-        # 主要处理两种情况:
-        # 1. 包含"Prompt (raw JSON):"的字符串需要特殊处理,保留JSON部分的格式
-        # 2. 普通元数据字符串的格式化
+        # 构建解析数据部分
+        display_dict = {
+            k: v for k, v in parsed_data.items()
+            if k not in ['_raw_info_dict', '_comfy_nodes_extracted'] 
+            and not (k == '_Parsing_Errors' and not v)
+        }
+        
+        # 格式化显示内容
         try:
-            if "Prompt (raw JSON):" in parsed_str:
-                # 按"Prompt (raw JSON):"分割字符串
-                parts = parsed_str.split("Prompt (raw JSON):")
-                if len(parts) >= 2:
-                    # 日志记录
-                    # self.log_message(f"Found 'Prompt (raw JSON):' in metadata for {metadata.get('file_path')}")
-                    # 处理第一部分(非JSON部分)
-                    # 去除首尾行,每行去除空格,用换行符连接
-                    parsed_str1 = '{\n' + '\n'.join([line.strip() for line in parts[0].split('\n')[1:-1]]) + '\n}'
-                    # 格式化处理:添加换行,替换转义字符
-                    parsed_str1 = parsed_str1.replace("{", "{\n").replace("}", "\n}").replace("\\\\n", "\n")
-                    # 移除多余的空行
-                    parsed_str1 = parsed_str1.replace("\n\n", "\n")
-                    
-                    # 重新组合两部分
-                    parsed_str = parsed_str1 + "Prompt (raw JSON):" + parts[1]
-                else:
-                    # 处理格式异常的情况,使用通用格式化
-                    pass
-            else:
-                # 处理不包含JSON的普通元数据字符串
-                parsed_str = '{\n' + '\n'.join([line.strip() for line in parsed_str.split('\n')[1:-1]]) + '\n}'
-                parsed_str = parsed_str.replace("{", "{\n").replace("}", "\n}").replace("\\\\n", "\n")
-                parsed_str = parsed_str.replace("\n\n", "\n")
-            # 检查字符串中的连续大括号并修复格式
-            while "{\n{" in parsed_str1 and "}\n}" in parsed_str1:
-                parsed_str1 = parsed_str1.replace("{\n{", "{\n").replace("}\n}", "}\n")
-            # positive-prompt的换行处理
-            parsed_str = parsed_str.replace("\\n", "\n")
+            parsed_str = self._format_metadata_display(display_dict)
         except Exception as e:
             self.log_message(f"格式化元数据时出错: {e}")
             parsed_str = pprint.pformat(display_dict, width=1145)
 
-
-        self.metadata_text.setText(basic_info_str + source_str + parsed_str)
+        # 显示所有内容
+        metadata_text_content = basic_info_str + source_str + parsed_str
+        
+        # 如果是ComfyUI类型，提取特定节点内容
+        if source_type == "ComfyUI":
+            clip_text = ""
+            display_text = ""
+            
+            # 查找CLIP文本编码器和展示文本节点
+            for node_id, node_data in comfy_nodes_extracted.items():
+                if "CLIP文本编码器" in node_id:
+                    clip_text = f"\n\nCLIP文本编码器内容:\n{self._format_metadata_display(node_data)}"
+                elif "展示文本" in node_id:
+                    display_text = f"\n\n展示文本内容:\n{self._format_metadata_display(node_data)}"
+            
+            metadata_text_content += clip_text + display_text
+        
+        self.metadata_text.setText(metadata_text_content)
         self.log_message(f"已显示元数据: {metadata.get('file_path')}")
 
-        # Populate ComfyUI Node List if available (FR-14)
-        # nodes = metadata.get('comfy_nodes', {})
-        if comfy_nodes_extracted:
-            self.node_list.clear()
-            self.node_list_label.setVisible(True)
-            self.node_list.setVisible(True)
-            for node_title_id, node_data in comfy_nodes_extracted.items():
-                 item = QListWidgetItem(node_title_id)
-                 # Store the full node data with the item for later retrieval
-                 item.setData(Qt.ItemDataRole.UserRole, node_data)
-                 self.node_list.addItem(item)
-            self.log_message(f"已填充ComfyUI节点列表(共{len(comfy_nodes_extracted)}个节点).")
+        # 显示ComfyUI节点列表
+        self._display_comfy_nodes(comfy_nodes_extracted)
+
+    def _format_metadata_display(self, data: dict) -> str:
+        """Helper method to format metadata for display."""
+        try:
+            formatted = pprint.pformat(data, width=1145)
+            
+            # 统一替换特殊字符
+            formatted = formatted.replace("'", "").replace(":", ": ").replace(", ", ",")
+            formatted = formatted.replace("\\\\", "\\").replace("\\n", "\n")
+            
+            # 处理JSON部分
+            if "Prompt (raw JSON):" in formatted:
+                parts = formatted.split("Prompt (raw JSON):")
+                if len(parts) >= 2:
+                    # 格式化非JSON部分
+                    non_json = '{\n' + '\n'.join(line.strip() 
+                        for line in parts[0].split('\n')[1:-1]) + '\n}'
+                    non_json = self._clean_formatting(non_json)
+                    return non_json + "Prompt (raw JSON):" + parts[1]
+            
+            # 普通格式化
+            return '{\n' + '\n'.join(line.strip() 
+                for line in formatted.split('\n')[1:-1]) + '\n}'
+        except Exception as e:
+            self.log_message(f"格式化元数据时发生错误: {e}\n原始数据: {data}")
+            return f"格式化错误: {e}\n原始数据: {pprint.pformat(data, width=1145)}"
+
+    def _clean_formatting(self, text: str) -> str:
+        """Clean up formatting artifacts in the text."""
+        text = text.replace("{", "{\n").replace("}", "\n}")
+        while "{\n{" in text and "}\n}" in text:
+            text = text.replace("{\n{", "{\n").replace("}\n}", "}\n")
+        return text.replace("\n\n", "\n")
+
+    def _display_comfy_nodes(self, nodes: dict):
+        """Display ComfyUI nodes in the list widget."""
+        if not nodes:
+            return
+            
+        self.node_list.clear()
+        self.node_list_label.setVisible(True)
+        self.node_list.setVisible(True)
+        
+        for node_title_id, node_data in nodes.items():
+            item = QListWidgetItem(node_title_id)
+            item.setData(Qt.ItemDataRole.UserRole, node_data)
+            self.node_list.addItem(item)
+            
+        self.log_message(f"已填充ComfyUI节点列表(共{len(nodes)}个节点).")
+        self.basic_info_button.setVisible(True)
+        self.basic_info = self.metadata_text.toPlainText()
 
 
     def display_image_preview(self, file_path: str):
@@ -484,39 +526,46 @@ class MainWindow(QMainWindow):
 
     @Slot(QListWidgetItem, QListWidgetItem)
     def handle_list_selection_changed(self, current_item: QListWidgetItem, previous_item: QListWidgetItem = None):
-        """Handles selection change in the file list widget (triggers metadata load)."""
+        """处理文件列表选择变化事件(触发元数据加载)"""
+        # 如果当前没有选中项(如清空选择)
         if current_item is None:
-            self.clear_displays()
+            self.clear_displays()  # 清除所有显示内容
             return
 
+        # 从列表项中获取完整文件路径
         file_path = current_item.data(Qt.ItemDataRole.UserRole)
+        # 检查文件路径是否有效
         if not file_path or not os.path.isfile(file_path):
-            self.log_message(f"Invalid item selected or file not found: {file_path}")
+            self.log_message(f"选择的项目无效或文件不存在: {file_path}")
             return
 
-        # 设置状态
+        # 更新界面状态记录
         if self.file_list_widget.isVisible():
+            # 根据是否有搜索模式记录不同状态
             self.previous_state = "folder_view" if not self.current_search_pattern else "search_view"
 
-        # Check cache first
+        # 检查元数据缓存
         if file_path in self.current_metadata_cache:
-             metadata = self.current_metadata_cache[file_path]
+            # 如果缓存中存在，直接使用缓存数据
+            metadata = self.current_metadata_cache[file_path]
         else:
-            # Parse metadata (FR-03 automatic trigger)
-            self.log_message(f"Parsing metadata for selected file: {os.path.basename(file_path)}")
+            # 缓存中没有则解析元数据
+            self.log_message(f"正在解析选中文件的元数据: {os.path.basename(file_path)}")
             metadata = metadata_parser.get_image_metadata(file_path)
-            self.current_metadata_cache[file_path] = metadata # Cache the result
+            # 将结果存入缓存
+            self.current_metadata_cache[file_path] = metadata
 
         if metadata:
-            # 先显示元数据，再显示预览
+            # 先显示元数据
             self.display_metadata(metadata)
-            # 确保预览显示
+            # 再显示图片预览
             self.display_image_preview(file_path)
         else:
-             self.clear_displays()
-             self.log_message(f"Failed to get metadata for {file_path}")
-             # 即使没有元数据，也尝试显示图片预览
-             self.display_image_preview(file_path)
+            # 元数据获取失败时的处理
+            self.clear_displays()  # 清除显示
+            self.log_message(f"获取元数据失败: {file_path}")
+            # 即使没有元数据也尝试显示图片预览
+            self.display_image_preview(file_path)
 
 
     @Slot(QListWidgetItem, QListWidgetItem)
@@ -532,6 +581,7 @@ class MainWindow(QMainWindow):
              # Display node details in the main text area (FR-13 option)
              node_details_str = f"Selected Node: {current_item.text()}\n\n"
              node_details_str += pprint.pformat(node_data, indent=2, width=120)
+             node_details_str = self._format_metadata_display(node_details_str)
              self.metadata_text.setText(node_details_str) # Overwrite main text area
              self.log_message(f"Displayed details for node: {current_item.text()}")
 
@@ -613,25 +663,36 @@ class MainWindow(QMainWindow):
     # --- File/Folder Processing Logic ---
 
     def process_single_file(self, file_path: str):
-        """Loads and displays a single image file."""
-        self.log_message(f"Processing single file: {file_path}")
-        self.current_single_file = file_path
-        self.current_folder_path = None
-        self.current_file_list = []
-        self.current_metadata_cache = {} # Reset cache for single file view
+        """加载并显示单个图像文件
+        
+        Args:
+            file_path: 要处理的图像文件路径
+        """
+        # 记录处理日志
+        self.log_message(f"正在处理单个文件: {file_path}")
+        
+        # 更新当前状态
+        self.current_single_file = file_path  # 设置当前处理的单个文件
+        self.current_folder_path = None  # 清空当前文件夹路径
+        self.current_file_list = []  # 清空文件列表
+        self.current_metadata_cache = {}  # 重置元数据缓存
 
-        # Parse metadata (FR-03)
+        # 解析图像元数据
         metadata = metadata_parser.get_image_metadata(file_path)
-        self.current_metadata_cache[file_path] = metadata  # Store in cache
-        self.original_file_list = self.current_file_list  # 保存原始文件列表
+        # 将元数据存入缓存
+        self.current_metadata_cache[file_path] = metadata  
+        # 保存原始文件列表(当前为空)
+        self.original_file_list = self.current_file_list  
 
         if metadata:
+            # 显示元数据和图片预览
             self.display_metadata(metadata)
-            self.display_image_preview(file_path)  # Also show preview
+            self.display_image_preview(file_path)
         else:
-            self.clear_displays()
-            self.show_image_preview()  # Show preview area with error potentially
-            self.log_message(f"Failed to process single file: {file_path}")
+            # 处理失败情况
+            self.clear_displays()  # 清除显示内容
+            self.show_image_preview()  # 显示预览区域(可能包含错误)
+            self.log_message(f"处理单个文件失败: {file_path}")
 
 
     def process_folder(self, path_or_list, is_explicit_list=False):

@@ -287,6 +287,16 @@ def get_image_metadata(file_path: str) -> dict | None:
                  # 如果“info”为空但“text”存在，则处理 PNG 文本块
                  # 有时元数据存储在此处而不是“info”中
                  info_dict = img.text.copy()
+            
+            # 处理嵌套在Comment字段中的JSON格式元数据
+            if 'Comment' in info_dict and isinstance(info_dict['Comment'], str):
+                try:
+                    comment_data = json.loads(info_dict['Comment'])
+                    if isinstance(comment_data, dict):
+                        info_dict.update(comment_data)
+                except json.JSONDecodeError:
+                    pass
+            
             result['raw_info'] = info_dict
 
             # 识别来源（FR-08 和第 4.5 节）
